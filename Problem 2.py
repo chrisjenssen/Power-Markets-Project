@@ -1,91 +1,143 @@
+import pyomo as pyo
 from pyomo.environ import *
 from pyomo.opt import SolverFactory
 import pandas as pd
 
-production_file = "production_data.csv"
-consumption_file = "consumption_data(1).csv"
-
-# Importing data
-
-def ImportData(production_data_filename, consumption_data_filename):
-    p_data = pd.read_csv(production_data_filename).set_index('Producer', drop=True)
-    c_data = pd.read_csv(consumption_data_filename).set_index('Consumer', drop=True)
-    return p_data, c_data
-
-p_data, c_data = ImportData('production_data.csv', 'consumption_data(1).csv')
 
 
-# Define the sets, and the set-dependent parameters, and variables
 
-producers = p_data.index.tolist()
-p_capacity = dict(zip(producers, p_data['Capacity'].tolist()))
-p_cost = dict(zip(producers, p_data['Cost'].tolist()))
-p_emission = dict(zip(producers, p_data['EmissionFactor'].tolist()))
+def DCOPF(Data):
 
-consumers = c_data.index.tolist()
-c_capacity = dict(zip(consumers, c_data['Capacity'].tolist()))
-c_cost = dict(zip(consumers, c_data['Cost'].tolist()))
+    # Model
 
+    model = pyo.ConcreteModel()  # Establish the optimization model, as a concrete model
 
-model = ConcreteModel()
+    # Sets:
 
-# Define the sets
-model.p = Set(initialize=producers)
-model.c = Set(initialize=consumers)
+    model.N = pyo.Set(ordered=True, initialize=Data["Nodes"]["NodeList"])  # Set for nodes
 
-# Define parameters
-model.p_capacity = Param(model.p, initialize=p_capacity)
-model.p_cost = Param(model.p, initialize=p_cost)
-model.p_emission = Param(model.p, initialize=p_emission)
-model.c_capacity = Param(model.c, initialize=c_capacity)
-model.c_cost = Param(model.c, initialize=c_cost)
+    # Parameters:
 
-# Define variables
-model.p_P = Var(model.p, within=NonNegativeReals) # Production per producer
-model.c_C = Var(model.c, within=NonNegativeReals) # Consumption per consumer
+    model.Demand = pyo.Param(model.N, initialize=Data["Nodes"]["DEMAND"])  # Parameter for demand for every node
 
-# Mathematical formulation, maximize social surplus, constraints
+    #model.P_min = pyo.Param(model.N, initialize=Data["Nodes"]["GENMIN"])  # Parameter for minimum production for every node
 
-def objective_rule(model):
-    # consumer price* generation per generator - generator cost*generator capacity
-    return sum(model.c_cost[d]*model.c_C[d] for d in model.c) - sum(model.p_cost[g]*model.p_P[g] for g in model.p)
-model.objective = Objective(rule=objective_rule, sense=maximize)
+    model.capacity = pyo.Param(model.N, initialize=Data["Nodes"]["capacity"])  # Parameter for max production for every node
 
-# Define constraints
-# Contraint: producer/generator capacity
-def producer_capacity_rule(model, g):
-    return model.p_P[g] <= model.p_capacity[g]
-model.producer_capacity = Constraint(model.p, rule=producer_capacity_rule)
+    model.MC = pyo.Param(model.N, initialize=Data["Nodes"]["MC"])  # Parameter for generation cost for every node
 
-# Constraint: consumer capacity
-def consumer_capacity_rule(model, d):
-    return model.c_C[d] <= model.c_capacity[d]
-model.consumer_capacity = Constraint(model.c, rule=consumer_capacity_rule)
+    #model.Cost_shed = pyo.Param(initialize=Data["ShedCost"])  # Parameter for cost of shedding power
 
-# Constraint: power balance, supply = demand
-def power_balance_rule(model):
-    return sum(model.p_P[g] for g in model.p) == sum(model.c_C[d] for d in model.c)
-model.power_balance = Constraint(rule=power_balance_rule)
+    model.Pu_base = pyo.Param(initialize=Data["pu-Base"])  # Parameter for per unit factor
+
+    # Line capacity:
+
+    model.DC_cap    = pyo.Param(model.H, initialize = Data["DC-lines"]["Cap"])          #Parameter for Cable capacity for every cable
 
 
-# Create Pyomo model and solve using gurobi
+    """
+    Variables
+    """
 
-solver = SolverFactory('gurobi')
-model.dual = Suffix(direction=Suffix.IMPORT)
-results = solver.solve(model, tee=True)
+    # Nodes
+    model.theta = pyo.Var(model.N)  # Variable for angle on bus for every node
 
-# Find the market price, the quantity sold/bought for each company and total surplus.
-print(f"\n{'='*10} Task 1 {'='*10}")
-if model.power_balance in model.dual:
-    print("Electricity market clearing price: ", abs(model.dual[model.power_balance]))
-else:
-    print("No dual value for electricity market clearing price")
+    model.gen = pyo.Var(model.N)  # Variable for generated power on every node
 
-print(f"{'='*10} Optimal Solution {'='*10}")
-print("Social welfare: ", model.objective())
-for g in model.p:
-    print(f"Producer {g} produced {model.p_P[g]()} MW")
-for d in model.c:
-    print(f"Consumer {d} consumed {model.c_C[d]()} MW")
+    #model.shed = pyo.Var(model.N, within=pyo.NonNegativeReals)  # Variable for shed power on every node
 
+    # DC-lines
+
+    model.flow_DC = pyo.Var(model.H)  # Variable for power flow on every cable
+
+    """
+    Objective function: 
+    """
+
+    def ObjRule(model):  # Define objective function
+        return (sum(model.gen[n] * model.Cost_gen[n] for n in model.N) + \
+                sum(model.shed[n] * model.Cost_shed for n in model.N))
+
+    model.OBJ = pyo.Objective(rule=ObjRule, sense=pyo.minimize)  # Create objective function based on given function
+
+    """
+    Constraints
+    """
+
+    """
+    # Minimum generation
+    # Every generating unit must provide at least the minimum capacity
+
+    def Min_gen(model, n):
+        return (model.gen[n] >= model.P_min[n])
+
+    model.Min_gen_const = pyo.Constraint(model.N, rule=Min_gen)
+    """
+
+    # Maximum generation
+    # Every generating unit cannot provide more than maximum capacity
+
+    def Max_gen(model, n):
+        return (model.gen[n] <= model.P_max[n])
+
+    model.Max_gen_const = pyo.Constraint(model.N, rule=Max_gen)
+
+    # Maximum from-flow line
+    # Sets the higher gap of line flow from unit n
+
+    def From_flow(model, l):
+        return (model.flow_AC[l] <= model.P_AC_max[l])
+
+    model.From_flow_L = pyo.Constraint(model.L, rule=From_flow)
+
+    # Maximum to-flow line
+    # Sets the higher gap of line flow to unit n (given as negative flow)
+
+    def To_flow(model, l):
+        return (model.flow_AC[l] >= -model.P_AC_min[l])
+
+    model.To_flow_L = pyo.Constraint(model.L, rule=To_flow)
+
+    # Maximum from-flow cable
+    # Sets the higher gap of cable flow from unit n
+
+    def FlowBalDC_max(model, h):
+        return (model.flow_DC[h] <= model.DC_cap[h])
+
+    model.FlowBalDC_max_const = pyo.Constraint(model.H, rule=FlowBalDC_max)
+
+    # Maximum to-flow cable
+    # Sets the higher gap of cable flow to unit n (given as negative flow)
+
+    def FlowBalDC_min(model, h):
+        return (model.flow_DC[h] >= -model.DC_cap[h])
+
+    model.FlowBalDC_min_const = pyo.Constraint(model.H, rule=FlowBalDC_min)
+
+    # If we want to run the model using DC Optimal Power Flow
+    if Data["DCFlow"] == True:
+        # Set the reference node to have a theta == 0
+
+        def ref_node(model):
+            return (model.theta[Data["Reference node"]] == 0)
+
+        model.ref_node_const = pyo.Constraint(rule=ref_node)
+
+        # Loadbalance; that generation meets demand, shedding, and transfer from lines and cables
+
+        def LoadBal(model, n):
+            return (model.gen[n] + model.shed[n] == model.Demand[n] + \
+                    sum(Data["B-matrix"][n - 1][o - 1] * model.theta[o] * model.Pu_base for o in model.N) + \
+                    sum(Data["DC-matrix"][h - 1][n - 1] * model.flow_DC[h] for h in model.H))
+
+        model.LoadBal_const = pyo.Constraint(model.N, rule=LoadBal)
+
+        # Flow balance; that flow in line is equal to change in phase angle multiplied with the admittance for the line
+
+        def FlowBal(model, l):
+            return (model.flow_AC[l] / model.Pu_base == (
+                        (model.theta[model.AC_from[l]] - model.theta[model.AC_to[l]]) * -
+                Data["B-matrix"][model.AC_from[l] - 1][model.AC_to[l] - 1]))
+
+        model.FlowBal_const = pyo.Constraint(model.L, rule=FlowBal)
 
