@@ -7,3 +7,17 @@ def readexcelfile(fileName, sheetname):
 
 fileName = 'Problem_2_data.xlsx'
 sheetname = 'Problem 2.2 - Base case'
+
+def create_y_bus_matrix(num_buses, susceptance_dict):
+
+    Y_bus = np.zeros((num_buses, num_buses), dtype=complex)
+
+    # Fill the Y-bus matrix
+    for (i, j), b_ij in susceptance_dict.items():
+        if i != j:
+            Y_bus[i, j] -= b_ij
+            Y_bus[j, i] -= b_ij
+            Y_bus[i, i] += b_ij
+            Y_bus[j, j] += b_ij
+
+    return Y_bus
