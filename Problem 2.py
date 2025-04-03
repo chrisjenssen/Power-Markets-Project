@@ -2,18 +2,10 @@ from pyomo.environ import *
 from pyomo.opt import SolverFactory
 import pandas as pd
 
-production_file = "production_data.csv"
-consumption_file = "consumption_data(1).csv"
-
-# Importing data
-
-def ImportData(production_data_filename, consumption_data_filename):
-    p_data = pd.read_csv(production_data_filename).set_index('Producer', drop=True)
-    c_data = pd.read_csv(consumption_data_filename).set_index('Consumer', drop=True)
-    return p_data, c_data
-
-p_data, c_data = ImportData('production_data.csv', 'consumption_data(1).csv')
-
+fileName = 'Problem_2_data.xlsx'
+df = pd.read_excel(fileName,sheet_name='Problem 2.2 - Base case', header=2)
+generator_data = df.loc[0:4,'Generator':'Slack bus']
+print(generator_data)
 
 # Define the sets, and the set-dependent parameters, and variables
 
