@@ -2,10 +2,15 @@ from pyomo.environ import *
 from pyomo.opt import SolverFactory
 import pandas as pd
 
+def readexcelfile(fileName, sheetname):
+    df = pd.read_excel(fileName,sheet_name=sheetname, header=2)
+    generator_data = df.loc[:,'Generator':'Slack bus']
+    load_data = df.loc[:,'Load unit':'Location']
+    transmission_data = df.loc[:,'Line':'Susceptance [p.u]']
+    return(generator_data, load_data, transmission_data)
+
 fileName = 'Problem_2_data.xlsx'
-df = pd.read_excel(fileName,sheet_name='Problem 2.2 - Base case', header=2)
-generator_data = df.loc[0:4,'Generator':'Slack bus']
-print(generator_data)
+sheetname = 'Problem 2.2 - Base case'
 
 # Define the sets, and the set-dependent parameters, and variables
 
