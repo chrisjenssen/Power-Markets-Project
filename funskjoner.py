@@ -70,11 +70,10 @@ print(generator)
 
 num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_bus_matrix(num_buses, transmission)
+print("Y-bus Matrix:")
+print(Y_bus)
 
 Y_DC = generate_Y_DC(generator, transmission)
 print("Y-bus Matrix for DC Power Flow:")
 print(Y_DC)
-
-print("Y-bus Matrix:")
-print(Y_bus)
 """
