@@ -13,7 +13,7 @@ def read_excel_file(fileName, sheetName):
     transmission_data = df.loc[:, 'Line':'Susceptance [p.u]']
     return generator_data, load_data, transmission_data
 
-def create_y_DC_matrix(num_buses, susceptance_df):
+def create_y_matrix(num_buses, susceptance_df):
     """
     Create a Y-bus matrix given the number of buses and a DataFrame of susceptance values.
     Returns an np.ndarray
@@ -61,18 +61,21 @@ def generate_Y_DC(generator_df, Ybus):
 
 
 #Run to test the functions:
-
+"""
 filename = 'Problem_2_data.xlsx'
-sheetname = 'Problem 2.3 - Generators'
+sheetname = 'Problem 2.2 - Base case'
 
 generator, load, transmission = read_excel_file(filename, sheetname)
 print("Generation Data:")
 print(generator)
-"""
-num_buses = 3  # Set the number of buses in your system
+
+num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_bus_matrix(num_buses, transmission)
 
-# Display the Y-bus matrix
+Y_DC = generate_Y_DC(generator, transmission)
+print("Y-bus Matrix for DC Power Flow:")
+print(Y_DC)
+
 print("Y-bus Matrix:")
 print(Y_bus)
 """
