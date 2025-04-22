@@ -1,8 +1,6 @@
 import numpy as np
 import sys
 import pandas as pd
-import pyomo.environ as pyo
-from pyomo.opt import SolverFactory
 #import matplotlib.pyplot as plt
 
 from funskjoner import read_excel_file, create_y_matrix, generate_Y_DC
