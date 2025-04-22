@@ -2,33 +2,36 @@ import pyomo as pyo
 from pyomo.environ import *
 from pyomo.opt import SolverFactory
 import pandas as pd
+import numpy as np
 
+from funksjoner import read_excel_file, create_y_bus_matrix
+filename = 'Problem_2_data.xlsx'
+sheetname = 'Problem 2.2 - Base case'
 
-
+generator, load, transmission = read_excel_file(filename, sheetname)
 
 def DCOPF(Data):
 
     # Model
-
     model = pyo.ConcreteModel()  # Establish the optimization model, as a concrete model
 
     # Sets:
 
-    model.N = pyo.Set(ordered=True, initialize=Data["Nodes"]["NodeList"])  # Set for nodes
+    model.G = pyo.Set(ordered=True, initialize=generator.index)  # Set for generation
+    model.L = pyo.Set(ordered=True, initialize=load.index)  # Set for loads
+    model.T = pyo.Set(ordered=True, initialize=transmission.index)  # Set for transmission lines
 
     # Parameters:
 
     model.Demand = pyo.Param(model.N, initialize=Data["Nodes"]["DEMAND"])  # Parameter for demand for every node
-
-    #model.P_min = pyo.Param(model.N, initialize=Data["Nodes"]["GENMIN"])  # Parameter for minimum production for every node
-
+    model.Pu_base = pyo.Param(initialize=Data["pu-Base"])  # Parameter for per unit factor
     model.capacity = pyo.Param(model.N, initialize=Data["Nodes"]["capacity"])  # Parameter for max production for every node
-
     model.MC = pyo.Param(model.N, initialize=Data["Nodes"]["MC"])  # Parameter for generation cost for every node
 
     #model.Cost_shed = pyo.Param(initialize=Data["ShedCost"])  # Parameter for cost of shedding power
+    #model.P_min = pyo.Param(model.N, initialize=Data["Nodes"]["GENMIN"])  # Parameter for minimum production for every node
 
-    model.Pu_base = pyo.Param(initialize=Data["pu-Base"])  # Parameter for per unit factor
+
 
     # Line capacity:
 
