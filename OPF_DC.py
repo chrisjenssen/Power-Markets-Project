@@ -71,17 +71,28 @@ model.transmission_to   = pyo.Param(
 
 """ ---- Variables ---- """
 
+model.gen = pyo.Var(
+    model.G,
+    bounds=lambda m,g: (0, m.Capacity_gen[g]),
+    initialize=0.0
+)
+model.flow_trans = pyo.Var(
+    model.T,
+    bounds=lambda m,t: (-m.Capacity_trans[t], m.Capacity_trans[t]),
+    initialize=0.0
+)
+
 # Generation levels for each generator
-model.gen = pyo.Var(model.G, within=pyo.NonNegativeReals)
+#model.gen = pyo.Var(model.G, within=pyo.NonNegativeReals)
 
 # Power flow through each transmission line
-model.flow_trans = pyo.Var(model.T)
+#model.flow_trans = pyo.Var(model.T)
 
 # Voltage angle at each node
-model.theta = pyo.Var(model.N)
+model.theta = pyo.Var(model.N,initialize=0.0)
 
 #Binary Variables, to model on/off decisions (e.g., whether a generator is running)
-model.gen_status = pyo.Var(model.G, within=pyo.Binary)
+#model.gen_status = pyo.Var(model.G, within=pyo.Binary)
 
 # Load shedding at each node (if applicable, dont know if it is)
 #model.shed = pyo.Var(model.N, within=pyo.NonNegativeReals)
@@ -91,32 +102,23 @@ Objective function:
 Maximize social welfare
 """
 
-def social_welfare_rule(model):
-    # Calculate the total benefit (consumer surplus)
-    total_benefit = sum(model.Demand[n] * model.theta[n] for n in model.N)  # Assuming theta represents the price signal
-
-    # Calculate the total cost (producer surplus)
-    total_cost = sum(model.gen[g] * model.MarginalCost[g] for g in model.G) # if applicable: + sum(model.shed[n] * model.Cost_shed for n in model.N)
-
-    # Social welfare is the total benefit minus the total cost
-    return total_benefit - total_cost
-
-# Define the objective function
-model.OBJ = pyo.Objective(rule=social_welfare_rule, sense=pyo.maximize)
-
+model.OBJ = pyo.Objective(
+    expr = sum(model.gen[g] * model.MarginalCost[g] for g in model.G),
+    sense = pyo.minimize
+)
 
 """
 Constraints
 """
 # Minimum generation constraint
 def min_gen_rule(model, g):
-    return model.gen[g] >= model.Capacity_gen[g] * model.gen_status[g]
+    return model.gen[g] >= 0
 
 model.min_gen_const = pyo.Constraint(model.G, rule=min_gen_rule)
 
 # Maximum generation constraint
 def max_gen_rule(model, g):
-    return model.gen[g] <= model.Capacity_gen[g] * model.gen_status[g]
+    return model.gen[g] <= model.Capacity_gen[g] #* model.gen_status[g]
 
 model.max_gen_const = pyo.Constraint(model.G, rule=max_gen_rule)
 
@@ -142,6 +144,9 @@ def ref_node_rule(model):
     return model.theta[reference_node] == 0
 
 model.ref_node_const = pyo.Constraint(rule=ref_node_rule)
+
+#reference_node = generator.loc[generator['Slack bus'], 'Location'].item()
+#model.theta[reference_node].fix(0)
 
 """
 # Power balance constraint
@@ -197,7 +202,7 @@ def load_balance_rule(model, n):
     # balance: generation + inflow == demand + outflow
     return gen_sum + ac_in == model.Demand[n] + ac_out
 
-model.load_balance_const = pyo.Constraint(model.N, rule=load_balance_rule)
+#model.load_balance_const = pyo.Constraint(model.N, rule=load_balance_rule)
 
 
 # --- Power balance at each node ---
@@ -253,24 +258,55 @@ print("\nReference Node Constraint (model.ref_node_const):")
 model.ref_node_const.pprint()
 print("\nFlow Balance Constraint (model.flow_balance_const):")
 model.flow_balance_const.pprint()
-    
+
+model.pprint()
 """
 Compute the optimization problem
 """
 
 # Set the solver for this
 # opt = SolverFactory("glpk")  # Uncomment if you want to use GLPK
-opt = SolverFactory('gurobi', solver_io="python")
+#opt = SolverFactory('gurobi', solver_io="python")
 
 # Enable dual variable reading -> important for dual values of results
-model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+#model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
 # Solve the problem
-results = opt.solve(model, load_solutions=True)
+#results = opt.solve(model, load_solutions=True)
+
+# Write result on performance
+#results.write()
+
+# … after you’ve built `model` …
+
+opt = SolverFactory('gurobi', solver_io='python')
+# tee=True will stream the solver log to your console
+results = opt.solve(model, tee=True)
+
+# For some Pyomo solvers you need to explicitly load the solution
+model.solutions.load_from(results)
 
 # Write result on performance
 results.write()
 
+#results = opt.solve(model, tee=True)
+print("Status:", results.solver.status)
+print("Termination:", results.solver.termination_condition)
+
+def dump_all_vars(m):
+    for varobj in m.component_objects(pyo.Var, active=True):
+        print(f"\nVariable: {varobj.name}")
+        for idx in varobj:
+            val = varobj[idx].value
+            if val is None:
+                print(f"  {idx} : n/a")
+            else:
+                print(f"  {idx} : {val:.3f}" if isinstance(val, (int,float)) else f"  {idx} : {val}")
+
+# usage
+dump_all_vars(model)
+
+"""
 # --- Generator results ---
 gen_df = pd.DataFrame({
     'Generator': list(model.G),
@@ -313,3 +349,4 @@ if hasattr(model, 'dual'):
     ], columns=['Node','Marginal Price'])
     print("=== Nodal Prices ===")
     print(lambdas.to_string(index=False))
+"""
