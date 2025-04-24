@@ -1,6 +1,7 @@
 
 import pyomo.environ as pyo
 from pyomo.opt import SolverFactory
+import pandas as pd
 
 
 from funskjoner import read_excel_file, create_y_matrix, generate_Y_DC
@@ -39,7 +40,7 @@ model.Capacity_gen = pyo.Param(model.G, initialize=generator.set_index('Generato
 
 model.MarginalCost = pyo.Param(model.G, initialize=generator.set_index('Generator')['Marginal cost NOK/MWh]'].to_dict())
 
-model.Pu_base   = pyo.Param(initialize = 1000)                   #Parameter for per unit factor
+model.Pu_base   = pyo.Param(initialize = 1000)                  #Parameter for per unit factor
 
 #Transmission lines
 
@@ -47,6 +48,26 @@ model.Capacity_trans  = pyo.Param(model.T, initialize = transmission.set_index('
 
 model.Susceptance  = pyo.Param(model.T, initialize = transmission.set_index('Line')["Susceptance [p.u]"].to_dict())      #Parameter for max transfer from node, for every line
 
+model.GenLocation = pyo.Param(
+    model.G,
+    initialize=generator.set_index('Generator')['Location'].to_dict()
+)
+
+# --- Build from/to node mappings for each line ---
+# this assumes your transmission DataFrame has a 'Line' column like "Line 1-2"
+splits = transmission['Line'].str.extract(r'Line\s*(\d+)-(\d+)')
+transmission['from_node'] = 'Node ' + splits[0]
+transmission['to_node']   = 'Node ' + splits[1]
+
+# Add those mappings as Pyomo Params
+model.transmission_from = pyo.Param(
+    model.T,
+    initialize=transmission.set_index('Line')['from_node'].to_dict()
+)
+model.transmission_to   = pyo.Param(
+    model.T,
+    initialize=transmission.set_index('Line')['to_node'].to_dict()
+)
 
 """ ---- Variables ---- """
 
@@ -122,7 +143,7 @@ def ref_node_rule(model):
 
 model.ref_node_const = pyo.Constraint(rule=ref_node_rule)
 
-
+"""
 # Power balance constraint
 def power_balance_rule(model, n):
     return (sum(model.gen[g] for g in model.G if generator.loc[generator['Generator'] == g, 'Location'].values[0] == n) ==
@@ -139,15 +160,82 @@ def flow_balance_rule(model, t):
     return model.flow_trans[t] == model.Susceptance[t] * (model.theta[from_node] - model.theta[to_node])
 
 model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
+"""
 
+
+"""
 # Load balance constraint
 def load_balance_rule(model, n):
     return (sum(model.gen[g] for g in model.G if generator.loc[generator['Generator'] == g, 'Location'].values[0] == n) ==
             model.Demand[n] +
             sum(Y_bus[n-1][o-1] * model.theta[o] * model.Pu_base for o in model.N) +
-            sum(Y_DC[h-1][n-1] * model.flow_DC[h] for h in model.H))
+            #sum(Y_DC[h-1][n-1] * model.flow_DC[h] for h in model.H))
 
 model.load_balance_const = pyo.Constraint(model.N, rule=load_balance_rule)
+"""
+
+def load_balance_rule(model, n):
+    # total generation at node n
+    gen_sum = sum(
+        model.gen[g]
+        for g in model.G
+        if model.GenLocation[g] == n
+    )
+
+    # AC flows into and out of n
+    ac_in  = sum(
+        model.flow_trans[t]
+        for t in model.T
+        if model.transmission_to[t] == n
+    )
+    ac_out = sum(
+        model.flow_trans[t]
+        for t in model.T
+        if model.transmission_from[t] == n
+    )
+
+    # balance: generation + inflow == demand + outflow
+    return gen_sum + ac_in == model.Demand[n] + ac_out
+
+model.load_balance_const = pyo.Constraint(model.N, rule=load_balance_rule)
+
+
+# --- Power balance at each node ---
+def power_balance_rule(model, n):
+    # total generation at node n
+    gen_sum = sum(
+        model.gen[g]
+        for g in model.G
+        if generator.set_index('Generator')['Location'][g] == n
+    )
+    # total inflow to n
+    inflow = sum(
+        model.flow_trans[t]
+        for t in model.T
+        if model.transmission_to[t] == n
+    )
+    # total outflow from n
+    outflow = sum(
+        model.flow_trans[t]
+        for t in model.T
+        if model.transmission_from[t] == n
+    )
+    # balance: generation + inflow == demand + outflow
+    return gen_sum + inflow == model.Demand[n] + outflow
+
+model.power_balance_const = pyo.Constraint(model.N, rule=power_balance_rule)
+
+
+# --- DC flow law on each line ---
+def flow_balance_rule(model, t):
+    from_n = model.transmission_from[t]
+    to_n   = model.transmission_to[t]
+    # B_ij*(θ_i − θ_j)
+    return model.flow_trans[t] == model.Susceptance[t] * (
+        model.theta[from_n] - model.theta[to_n]
+    )
+
+model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
 
 
 # Print the constraints to verify
@@ -183,30 +271,45 @@ results = opt.solve(model, load_solutions=True)
 # Write result on performance
 results.write()
 
-# Print the results
-print("\n--- Results ---")
+# --- Generator results ---
+gen_df = pd.DataFrame({
+    'Generator': list(model.G),
+    'Online?':    [int(pyo.value(model.gen_status[g])) for g in model.G],
+    'Output (MW)': [pyo.value(model.gen[g]) for g in model.G],
+    'Capacity (MW)': [model.Capacity_gen[g] for g in model.G],
+})
+print("\n=== Generator Dispatch ===")
+print(gen_df.to_string(index=False))
 
-# Print generation levels
-print("\nGeneration Levels:")
-for g in model.G:
-    print(f"Generator {g}: {pyo.value(model.gen[g])} MW")
+# --- Line flows ---
+flow_df = pd.DataFrame({
+    'Line':      list(model.T),
+    'From':      [model.transmission_from[t] for t in model.T],
+    'To':        [model.transmission_to[t]   for t in model.T],
+    'Flow (MW)': [pyo.value(model.flow_trans[t]) for t in model.T],
+    'Cap (MW)':  [model.Capacity_trans[t]      for t in model.T],
+})
+print("\n=== Transmission Flows ===")
+print(flow_df.to_string(index=False))
 
-# Print power flows
-print("\nPower Flows:")
-for t in model.T:
-    print(f"Transmission Line {t}: {pyo.value(model.flow_trans[t])} MW")
+# --- Voltage angles ---
+theta_df = pd.DataFrame({
+    'Node':      list(model.N),
+    'Angle (rad)': [pyo.value(model.theta[n]) for n in model.N],
+    'Demand (MW)': [model.Demand[n] for n in model.N],
+})
+print("\n=== Nodal Angles & Demand ===")
+print(theta_df.to_string(index=False))
 
-# Print voltage angles
-print("\nVoltage Angles:")
-for n in model.N:
-    print(f"Node {n}: {pyo.value(model.theta[n])} rad")
+# --- Objective and (optional) duals ---
+sw = pyo.value(model.OBJ)
+print(f"\nSocial Welfare (objective) = {sw:.2f} NOK\n")
 
-# Print the objective function value
-print("\nObjective Function Value (Social Welfare):")
-print(pyo.value(model.OBJ))
-
-
-
-
-
-    
+# if you enabled model.dual:
+if hasattr(model, 'dual'):
+    lambdas = pd.DataFrame([
+        (n, model.dual[model.power_balance_const[n]])
+        for n in model.N
+    ], columns=['Node','Marginal Price'])
+    print("=== Nodal Prices ===")
+    print(lambdas.to_string(index=False))
