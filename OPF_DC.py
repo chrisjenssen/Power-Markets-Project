@@ -14,7 +14,7 @@ sheet_4 = 'Problem 2.5 - Environmental'
 generator, load, transmission = read_excel_file(filename, sheet_1)
 num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_matrix(num_buses, transmission)
-Y_DC = generate_Y_DC(generator, transmission)
+Y_DC = generate_Y_DC(generator, Y_bus)
 
 """ ---- Set up the optimization model ---- """
 model = pyo.ConcreteModel() #Establish the optimization model, as a concrete model in this case
@@ -31,7 +31,7 @@ model.T = pyo.Set(ordered = True, initialize = transmission['Line'].tolist())  #
 
 #Nodes
 
-model.Demand    = pyo.Param(model.N, initialize = load.set_index('Load unit')['Demand [MW]'].to_dict())  #Parameter for demand for every node
+model.Demand    = pyo.Param(model.N, initialize = load.set_index('Location.1')['Demand [MW]'].to_dict())  #Parameter for demand for every node
 
 #Generators
 
@@ -39,11 +39,13 @@ model.Capacity_gen = pyo.Param(model.G, initialize=generator.set_index('Generato
 
 model.MarginalCost = pyo.Param(model.G, initialize=generator.set_index('Generator')['Marginal cost NOK/MWh]'].to_dict())
 
-#model.Pu_base   = pyo.Param(initialize = Data["pu-Base"])                   #Parameter for per unit factor
+model.Pu_base   = pyo.Param(initialize = 1000)                   #Parameter for per unit factor
 
 #Transmission lines
 
-model.Capacity_trans  = pyo.Param(model.T, initialize = transmission["Capacity [MW]"].to_dict())     #Parameter for max transfer from node, for every line
+model.Capacity_trans  = pyo.Param(model.T, initialize = transmission.set_index('Line')["Capacity [MW].1"].to_dict())
+
+model.Susceptance  = pyo.Param(model.T, initialize = transmission.set_index('Line')["Susceptance [p.u]"].to_dict())      #Parameter for max transfer from node, for every line
 
 
 """ ---- Variables ---- """
@@ -125,16 +127,16 @@ model.ref_node_const = pyo.Constraint(rule=ref_node_rule)
 def power_balance_rule(model, n):
     return (sum(model.gen[g] for g in model.G if generator.loc[generator['Generator'] == g, 'Location'].values[0] == n) ==
             model.Demand[n] +
-            sum(model.flow_trans[t] for t in model.T if model.transmission_to[t] == n) -
-            sum(model.flow_trans[t] for t in model.T if model.transmission_from[t] == n))
+            sum(model.flow_trans[t] for t in model.T if model.Capacity_trans[t] == n) -
+            sum(model.flow_trans[t] for t in model.T if model.Capacity_trans[t] == n))
 
 model.power_balance_const = pyo.Constraint(model.N, rule=power_balance_rule)
 
 # Flow balance constraint
 def flow_balance_rule(model, t):
-    from_node = model.transmission_from[t]
-    to_node = model.transmission_to[t]
-    return model.flow_trans[t] == model.susceptance[t] * (model.theta[from_node] - model.theta[to_node])
+    from_node = model.Capacity_trans[t]
+    to_node = model.Capacity_trans[t]
+    return model.flow_trans[t] == model.Susceptance[t] * (model.theta[from_node] - model.theta[to_node])
 
 model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
 
