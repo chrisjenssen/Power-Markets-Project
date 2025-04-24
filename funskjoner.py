@@ -6,10 +6,18 @@ def read_excel_file(fileName, sheetName):
     Reads an Excel file and returns the generator, load, and transmission data.
     Returns in PD dataframes
     """
+    # Read the Excel file
     df = pd.read_excel(fileName, sheet_name=sheetName, header=2)
+
+    # Extract generator data
     generator_data = df.loc[:, 'Generator':'Slack bus']
-    load_data = df.loc[:, 'Load unit':'Location']
+
+    # Extract load data
+    load_data = df.loc[:, 'Load unit':'Location.1']
+
+    # Extract transmission line data
     transmission_data = df.loc[:, 'Line':'Susceptance [p.u]']
+
     return generator_data, load_data, transmission_data
 
 def create_y_matrix(num_buses, susceptance_df):
@@ -65,8 +73,15 @@ filename = 'Problem_2_data.xlsx'
 sheetname = 'Problem 2.2 - Base case'
 
 generator, load, transmission = read_excel_file(filename, sheetname)
-print("Generation Data:")
-print(generator)
+
+
+    # Print the dataframes to debug
+    print("Generator Data:")
+    print(generator_data)
+    print("\nLoad Data:")
+    print(load_data)
+    print("\nTransmission Line Data:")
+    print(transmission_data)
 
 num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_bus_matrix(num_buses, transmission)

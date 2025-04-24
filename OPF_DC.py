@@ -3,7 +3,7 @@ import pyomo.environ as pyo
 from pyomo.opt import SolverFactory
 
 
-from funskjoner import read_excel_file
+from funskjoner import read_excel_file, create_y_matrix, generate_Y_DC
 
 filename = 'Problem_2_data.xlsx'
 sheet_1 = 'Problem 2.2 - Base case'
@@ -12,13 +12,16 @@ sheet_3 = 'Problem 2.4 - Loads'
 sheet_4 = 'Problem 2.5 - Environmental'
 
 generator, load, transmission = read_excel_file(filename, sheet_1)
+num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
+Y_bus = create_y_matrix(num_buses, transmission)
+Y_DC = generate_Y_DC(generator, transmission)
 
 """ ---- Set up the optimization model ---- """
 model = pyo.ConcreteModel() #Establish the optimization model, as a concrete model in this case
 
 """ ---- Sets ---- """
 
-model.N = pyo.Set(ordered = True, initialize = load['Location'].unique().tolist())   #Set for nodes
+model.N = pyo.Set(ordered = True, initialize = load['Location.1'].unique().tolist())   #Set for nodes
 
 model.G = pyo.Set(ordered=True, initialize=generator['Generator'].tolist())
 
@@ -107,22 +110,25 @@ def min_flow_trans_rule(model, t):
 
 model.min_flow_trans_const = pyo.Constraint(model.T, rule=min_flow_trans_rule)
 
-#Set the reference node to have a theta == 0
+# Set the reference node to have a theta == 0
+# Extract the reference node
+reference_node = generator.loc[generator['Slack bus'], 'Location'].values[0]
 
-def ref_node(model):
-    return(model.theta[Data["Reference node"]] == 0)
-model.ref_node_const = pyo.Constraint(rule = ref_node)
+# Reference node constraint
+def ref_node_rule(model):
+    return model.theta[reference_node] == 0
+
+model.ref_node_const = pyo.Constraint(rule=ref_node_rule)
 
 
-# Power balance constraint; that generation meets demand, shedding, and transfer from lines and cables
+# Power balance constraint
 def power_balance_rule(model, n):
-    return (sum(model.gen[g] for g in model.G if model.generator_location[g] == n) ==
+    return (sum(model.gen[g] for g in model.G if generator.loc[generator['Generator'] == g, 'Location'].values[0] == n) ==
             model.Demand[n] +
             sum(model.flow_trans[t] for t in model.T if model.transmission_to[t] == n) -
             sum(model.flow_trans[t] for t in model.T if model.transmission_from[t] == n))
 
 model.power_balance_const = pyo.Constraint(model.N, rule=power_balance_rule)
-
 
 # Flow balance constraint
 def flow_balance_rule(model, t):
@@ -131,27 +137,74 @@ def flow_balance_rule(model, t):
     return model.flow_trans[t] == model.susceptance[t] * (model.theta[from_node] - model.theta[to_node])
 
 model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
- 
-    
+
+# Load balance constraint
+def load_balance_rule(model, n):
+    return (sum(model.gen[g] for g in model.G if generator.loc[generator['Generator'] == g, 'Location'].values[0] == n) ==
+            model.Demand[n] +
+            sum(Y_bus[n-1][o-1] * model.theta[o] * model.Pu_base for o in model.N) +
+            sum(Y_DC[h-1][n-1] * model.flow_DC[h] for h in model.H))
+
+model.load_balance_const = pyo.Constraint(model.N, rule=load_balance_rule)
+
+
+# Print the constraints to verify
+print("Minimum Generation Constraint (model.min_gen_const):")
+model.min_gen_const.pprint()
+print("\nMaximum Generation Constraint (model.max_gen_const):")
+model.max_gen_const.pprint()
+print("\nMaximum Flow Constraint (model.max_flow_trans_const):")
+model.max_flow_trans_const.pprint()
+print("\nMinimum Flow Constraint (model.min_flow_trans_const):")
+model.min_flow_trans_const.pprint()
+print("\nPower Balance Constraint (model.power_balance_const):")
+model.power_balance_const.pprint()
+print("\nReference Node Constraint (model.ref_node_const):")
+model.ref_node_const.pprint()
+print("\nFlow Balance Constraint (model.flow_balance_const):")
+model.flow_balance_const.pprint()
     
 """
 Compute the optimization problem
 """
-    
-#Set the solver for this
-#opt         = SolverFactory("glpk")
-opt         = SolverFactory('gurobi',solver_io="python")
+
+# Set the solver for this
+# opt = SolverFactory("glpk")  # Uncomment if you want to use GLPK
+opt = SolverFactory('gurobi', solver_io="python")
+
+# Enable dual variable reading -> important for dual values of results
+model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+
+# Solve the problem
+results = opt.solve(model, load_solutions=True)
+
+# Write result on performance
+results.write()
+
+# Print the results
+print("\n--- Results ---")
+
+# Print generation levels
+print("\nGeneration Levels:")
+for g in model.G:
+    print(f"Generator {g}: {pyo.value(model.gen[g])} MW")
+
+# Print power flows
+print("\nPower Flows:")
+for t in model.T:
+    print(f"Transmission Line {t}: {pyo.value(model.flow_trans[t])} MW")
+
+# Print voltage angles
+print("\nVoltage Angles:")
+for n in model.N:
+    print(f"Node {n}: {pyo.value(model.theta[n])} rad")
+
+# Print the objective function value
+print("\nObjective Function Value (Social Welfare):")
+print(pyo.value(model.OBJ))
 
 
 
-#Enable dual variable reading -> important for dual values of results
-model.dual      = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-
-#Solve the problem
-results     = opt.solve(model, load_solutions = True)
-
-#Write result on performance
-results.write(num=1)
 
     
