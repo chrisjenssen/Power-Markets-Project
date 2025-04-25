@@ -110,20 +110,10 @@ def OPF_DC(generator, load, transmission):
         return model.flow_trans[t] >= -model.Capacity_trans[t]
 
     model.min_flow_trans_const = pyo.Constraint(model.T, rule=min_flow_trans_rule)
-    """
+
     # Set the reference node to have a theta == 0
-    # Extract the reference node
-    reference_node = generator.loc[generator['Slack bus'], 'Location'].values[0]
-
-    # Reference node constraint
-    def ref_node_rule(model):
-        return model.theta[reference_node] == 0
-
-    model.ref_node_const = pyo.Constraint(rule=ref_node_rule)
-    """
     reference_node = generator.loc[generator['Slack bus'], 'Location'].item()
     model.theta[reference_node].fix(0)
-
 
     # Power balance at each node
     def power_balance_rule(model, n):
