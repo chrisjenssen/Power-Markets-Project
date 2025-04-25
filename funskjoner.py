@@ -67,6 +67,7 @@ def generate_Y_DC(generator_df, Ybus):
         return None
 
 
+"""
 #Run to test the functions:
 
 filename = 'Problem_2_data.xlsx'
@@ -74,15 +75,13 @@ sheetname = 'Problem 2.2 - Base case'
 
 generator, load, transmission = read_excel_file(filename, sheetname)
 
-"""
-    # Print the dataframes to debug
-    print("Generator Data:")
-    print(generator_data)
-    print("\nLoad Data:")
-    print(load_data)
-    print("\nTransmission Line Data:")
-    print(transmission_data)
-"""
+# Print the dataframes to debug
+print("Generator Data:")
+print(generator_data)
+print("\nLoad Data:")
+print(load_data)
+print("\nTransmission Line Data:")
+print(transmission_data)
 
 num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_matrix(num_buses, transmission)
@@ -93,4 +92,4 @@ Y_DC = generate_Y_DC(generator, Y_bus)
 print("Y-bus Matrix for DC Power Flow:")
 print(Y_DC)
 """
-"""
+
