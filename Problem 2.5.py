@@ -16,6 +16,11 @@ def read_excel_file(fileName, sheetName):
     ld = df.loc[:, 'Load unit':'Location.1'].copy()
     ld = ld[ld['Load unit'].notna()]
 
+    # ensure WTP is numeric, fill missing with 0.0
+    ld['Marginal WTP [NOK/MWh]'] = (
+        pd.to_numeric(ld['Marginal WTP [NOK/MWh]'], errors='coerce')
+        .fillna(0.0))
+
     # ---- Transmission lines ----
     tr = df.loc[:, 'Line':'Susceptance [p.u]'].copy()
     tr = tr[tr['Line'].notna()]
@@ -45,6 +50,24 @@ def OPF_DC(generator, load, transmission):
 
     model.T = pyo.Set(ordered=True, initialize=transmission['Line'].tolist())  # Set for transmission lines
 
+    # ---- NEW: define a load‐unit set L ----
+    model.L = pyo.Set(initialize=load['Load unit'].tolist())
+
+    # map each load → its node
+    model.LoadLocation = pyo.Param(
+        model.L,
+        initialize=load.set_index('Load unit')['Location.1'].to_dict()
+    )
+    # demand and WTP per load
+    model.D_L = pyo.Param(
+        model.L,
+        initialize=load.set_index('Load unit')['Demand [MW]'].to_dict()
+    )
+    model.WTP = pyo.Param(
+        model.L,
+        initialize=load.set_index('Load unit')['Marginal WTP [NOK/MWh]'].to_dict()
+    )
+
     """ ---- Parameters ----"""
 
     # Nodes
@@ -58,12 +81,26 @@ def OPF_DC(generator, load, transmission):
     )
     model.Demand = pyo.Param(model.N, initialize=demand_by_node)  # Parameter for demand for every node
 
+    # ---- replace fixed-demands by served‐load vars ----
+    # how much of each load‐unit we actually serve (0 ≤ serve ≤ D_L)
+    model.serve = pyo.Var(model.L, bounds=lambda M, ℓ: (0, M.D_L[ℓ]), initialize=lambda M, ℓ: M.D_L[ℓ])
+
+    # force inelastic loads (WTP=0) to be fully served
+    def inelastic_rule(M, ℓ):
+        if M.WTP[ℓ] == 0.0:
+            return M.serve[ℓ] == M.D_L[ℓ]
+        return pyo.Constraint.Skip
+
+    model.inelastic_const = pyo.Constraint(model.L, rule=inelastic_rule)
+
     # Generators
 
     model.Capacity_gen = pyo.Param(model.G, initialize=generator.set_index('Generator')['Capacity [MW]'].to_dict())
 
     model.MarginalCost = pyo.Param(model.G,
                                    initialize=generator.set_index('Generator')['Marginal cost NOK/MWh]'].to_dict())
+
+    model.em = pyo.Param(model.G, initialize=generator.set_index('Generator')['CO2 emission [kg/MWh]'].to_dict())
 
     model.Pu_base = pyo.Param(initialize=1000)  # Parameter for per unit factor
 
@@ -108,12 +145,14 @@ def OPF_DC(generator, load, transmission):
 
     """
     Objective function:
-    Minimize generation cost
+    Maximize social welfare
     """
 
     model.OBJ = pyo.Objective(
-        expr=sum(model.gen[g] * model.MarginalCost[g] for g in model.G),
-        sense=pyo.minimize)
+        expr=sum(model.WTP[ℓ] * model.serve[ℓ] for ℓ in model.L)
+             - sum(model.MarginalCost[g] * model.gen[g] for g in model.G),
+        sense=pyo.maximize
+    )
 
     """
     Constraints
@@ -150,23 +189,15 @@ def OPF_DC(generator, load, transmission):
 
     model.theta[reference_node].fix(0)
 
-    # Power balance at each node
-    def power_balance_rule(model, n):
-        # sum of gens at node n
-        gen_sum = sum(model.gen[g]
-                      for g in model.G
-                      if model.GenLocation[g] == n)
-        # inflow / outflow unchanged
-        inflow = sum(model.flow_trans[t]
-                     for t in model.T
-                     if model.transmission_to[t] == n)
-        outflow = sum(model.flow_trans[t]
-                      for t in model.T
-                      if model.transmission_from[t] == n)
+    # ---- revised power‐balance: gens + inflow = Σ serve + outflow ----
+    def balance_rule(M, n):
+        gen_sum = sum(M.gen[g] for g in M.G if M.GenLocation[g] == n)
+        inflow = sum(M.flow_trans[t] for t in M.T if M.transmission_to[t] == n)
+        outflow = sum(M.flow_trans[t] for t in M.T if M.transmission_from[t] == n)
+        load_sum = sum(M.serve[ℓ] for ℓ in M.L if M.LoadLocation[ℓ] == n)
+        return gen_sum + inflow == load_sum + outflow
 
-        return gen_sum + inflow == model.Demand[n] + outflow
-
-    model.power_balance_const = pyo.Constraint(model.N, rule=power_balance_rule)
+    model.power_balance_const = pyo.Constraint(model.N, rule=balance_rule)
 
     # DC flow law on each line
     def flow_balance_rule(model, t):
@@ -176,6 +207,18 @@ def OPF_DC(generator, load, transmission):
         return model.flow_trans[t] == model.Susceptance[t] * (model.theta[from_n] - model.theta[to_n])
 
     model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
+    """
+    # Enforce Gen 2 ≥ 20% of total generation
+    def emission_rule(model):
+        return model.gen['Gen 2'] >= 0.2 * sum(model.gen[g] for g in model.G)
+
+    #model.emission_const = pyo.Constraint(rule=emission_rule)
+    """
+    # Cap and trade rule
+    def cap_and_trade_rule(model):
+        return sum(model.em[g] * model.gen[g] for g in model.G) <= 950000
+
+    model.cap_and_trade_const = pyo.Constraint(rule=cap_and_trade_rule)
 
     # model.pprint()
 
@@ -193,13 +236,6 @@ def OPF_DC(generator, load, transmission):
     results = opt.solve(model, tee=True)
     model.solutions.load_from(results)
 
-    print("\n=== Binding constraints ===")
-    for g in model.G:
-        if abs(model.gen[g].value - model.Capacity_gen[g]) < 1e-6:
-            print(f" Generator {g} at upper limit")
-    for t in model.T:
-        if abs(abs(model.flow_trans[t].value) - model.Capacity_trans[t]) < 1e-6:
-            print(f" Line {t} congested")
 
     # 1) PRODUCTION COST per generator
     prod_data = []
@@ -213,7 +249,7 @@ def OPF_DC(generator, load, transmission):
             'Total Cost [NOK/h]': q * c
         })
     df_prod = pd.DataFrame(prod_data)
-
+    """
     # 2) SHADOW PRICES
     #  2a) generator limits
     gen_shadow = []
@@ -258,6 +294,22 @@ def OPF_DC(generator, load, transmission):
 
     print("\n=== Line‐flow Shadow Prices ===")
     print(df_line_shadow.to_string(index=False))
+    """
+
+    # Extract and print shadow prices (dual variables)
+    print("\nShadow Prices (Dual Variables):")
+
+    for const in model.component_objects(pyo.Constraint, active=True):
+        print(f"\nConstraint: {const.name}")
+        for idx in const:
+            try:
+                dual_value = model.dual[const[idx]]
+                if dual_value is not None:
+                    print(f"  {idx} : {dual_value:.3f}")
+                else:
+                    print(f"  {idx} : n/a")
+            except KeyError:
+                print(f"  {idx} : Dual value not available")
 
     def dump_all_vars(m):
         for varobj in m.component_objects(pyo.Var, active=True):
@@ -279,7 +331,7 @@ sheet_2 = 'Problem 2.3 - Generators'
 sheet_3 = 'Problem 2.4 - Loads'
 sheet_4 = 'Problem 2.5 - Environmental'
 
-generator, load, transmission = read_excel_file(filename, sheet_3)
+generator, load, transmission = read_excel_file(filename, sheet_4)
 print(generator)
 print(load)
 print(transmission)
@@ -290,4 +342,3 @@ print(transmission)
 #Y_DC = generate_Y_DC(generator, Y_bus)
 
 OPF_DC(generator, load, transmission)
-

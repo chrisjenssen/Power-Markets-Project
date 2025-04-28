@@ -126,10 +126,10 @@ def OPF_DC(generator, load, transmission):
     """ ---- Variables ---- """
 
     # Generation levels for each generator
-    model.gen = pyo.Var(model.G, bounds=lambda m, g: (0, m.Capacity_gen[g]), initialize=0.0)
+    model.gen = pyo.Var(model.G, initialize=0.0)
 
     # Power flow through each transmission line
-    model.flow_trans = pyo.Var(model.T, bounds=lambda m, t: (-m.Capacity_trans[t], m.Capacity_trans[t]), initialize=0.0)
+    model.flow_trans = pyo.Var(model.T, initialize=0.0)
 
     # Voltage angle at each node
     model.theta = pyo.Var(model.N, initialize=0.0)
@@ -221,6 +221,14 @@ def OPF_DC(generator, load, transmission):
     opt = SolverFactory('gurobi', solver_io='python')
     results = opt.solve(model, tee=True)
     model.solutions.load_from(results)
+
+    print("\n=== Binding constraints ===")
+    for g in model.G:
+        if abs(model.gen[g].value - model.Capacity_gen[g]) < 1e-6:
+            print(f" Generator {g} at upper limit")
+    for t in model.T:
+        if abs(abs(model.flow_trans[t].value) - model.Capacity_trans[t]) < 1e-6:
+            print(f" Line {t} congested")
 
     # 1) PRODUCTION COST per generator
     prod_data = []

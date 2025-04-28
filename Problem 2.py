@@ -17,7 +17,7 @@ sheet_4 = 'Problem 2.5 - Environmental'
 generator, load, transmission = read_excel_file(filename, sheet_1)
 num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
 Y_bus = create_y_matrix(num_buses, transmission)
-Y_DC = generate_Y_DC(generator, transmission)
+Y_DC = generate_Y_DC(generator, Y_bus)
 
 OPF_DC(generator, load, transmission)
 

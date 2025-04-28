@@ -85,10 +85,13 @@ def OPF_DC(generator, load, transmission):
     """ ---- Variables ---- """
 
     # Generation levels for each generator
-    model.gen = pyo.Var(model.G, bounds=lambda m, g: (0, m.Capacity_gen[g]), initialize=0.0)
+    #model.gen = pyo.Var(model.G, bounds=lambda m, g: (0, m.Capacity_gen[g]), initialize=0.0)
+    # new: free variable, explicit constraints do the bounding
+    model.gen = pyo.Var(model.G, initialize=0.0)
 
     # Power flow through each transmission line
-    model.flow_trans = pyo.Var(model.T, bounds=lambda m, t: (-m.Capacity_trans[t], m.Capacity_trans[t]), initialize=0.0)
+    # new: no var‐bounds, just the free variable
+    model.flow_trans = pyo.Var(model.T, initialize=0.0)
 
     # Voltage angle at each node
     model.theta = pyo.Var(model.N, initialize=0.0)
@@ -177,8 +180,6 @@ def OPF_DC(generator, load, transmission):
     Compute the optimization problem
     """
 
-    #model = pyo.ConcreteModel()
-
     # register dual suffix so we can pull shadow prices back in
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
@@ -186,6 +187,14 @@ def OPF_DC(generator, load, transmission):
     opt = SolverFactory('gurobi', solver_io='python')
     results = opt.solve(model, tee=True)
     model.solutions.load_from(results)
+
+    print("\n=== Binding constraints ===")
+    for g in model.G:
+        if abs(model.gen[g].value - model.Capacity_gen[g]) < 1e-6:
+            print(f" Generator {g} at upper limit")
+    for t in model.T:
+        if abs(abs(model.flow_trans[t].value) - model.Capacity_trans[t]) < 1e-6:
+            print(f" Line {t} congested")
 
     # 1) PRODUCTION COST per generator
     prod_data = []
@@ -220,6 +229,12 @@ def OPF_DC(generator, load, transmission):
         node_shadow.append({'Node': n, 'LMP [NOK/MWh]': λ})
     df_node_shadow = pd.DataFrame(node_shadow)
 
+    line_shadow = []
+    for n in model.T:
+        tran = model.dual[model.flow_balance_const[n]]
+        line_shadow.append({'Line': n, 'LMP [NOK/MWh]': tran})
+    df_line1_shadow = pd.DataFrame(line_shadow)
+
     #  2c) line‐flow shadows
     line_shadow = []
     for t in model.T:
@@ -242,6 +257,9 @@ def OPF_DC(generator, load, transmission):
     print("\n=== Nodal Prices (LMPs) ===")
     print(df_node_shadow.to_string(index=False))
 
+    print("\n=== Line Prices (LMPs) ===")
+    print(df_line1_shadow.to_string(index=False))
+
     print("\n=== Line‐flow Shadow Prices ===")
     print(df_line_shadow.to_string(index=False))
 
@@ -255,7 +273,7 @@ def OPF_DC(generator, load, transmission):
                 else:
                     print(f"  {idx} : {val:.3f}" if isinstance(val, (int, float)) else f"  {idx} : {val}")
 
-    #dump_all_vars(model)
+    dump_all_vars(model)
 
 
 filename = 'Problem_2_data.xlsx' # Normal case for 2.3
@@ -267,7 +285,7 @@ sheet_2 = 'Problem 2.3 - Generators'
 sheet_3 = 'Problem 2.4 - Loads'
 sheet_4 = 'Problem 2.5 - Environmental'
 
-generator, load, transmission = read_excel_file(filename2, sheet_2)
+generator, load, transmission = read_excel_file(filename, sheet_1)
 print(generator)
 print(load)
 print(transmission)
