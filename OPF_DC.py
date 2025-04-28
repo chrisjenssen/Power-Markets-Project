@@ -25,7 +25,8 @@ def OPF_DC(generator, load, transmission):
 
     #Nodes
 
-    model.Demand    = pyo.Param(model.N, initialize = load.set_index('Location.1')['Demand [MW]'].to_dict())  #Parameter for demand for every node
+    demand_by_node = (load.groupby('Location.1')['Demand [MW]'].sum().to_dict())
+    model.Demand    = pyo.Param(model.N, initialize = demand_by_node)  #Parameter for demand for every node
 
     #Generators
 
@@ -69,18 +70,11 @@ def OPF_DC(generator, load, transmission):
 
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-    #----> Optional variables <----#
-    #Binary Variables, to model on/off decisions (e.g., whether a generator is running)
-    #model.gen_status = pyo.Var(model.G, within=pyo.Binary)
-
-    # Load shedding at each node (if applicable, dont know if it is)
-    #model.shed = pyo.Var(model.N, within=pyo.NonNegativeReals)
-
     """
     Objective function:
     Minimize generation cost
     """
-
+    
     model.OBJ = pyo.Objective(
         expr = sum(model.gen[g] * model.MarginalCost[g] for g in model.G),
         sense = pyo.minimize)
@@ -114,7 +108,7 @@ def OPF_DC(generator, load, transmission):
     model.min_flow_trans_const = pyo.Constraint(model.T, rule=min_flow_trans_rule)
 
     # Set the reference node to have a theta == 0
-    reference_node = generator.loc[generator['Slack bus'], 'Location'].item()
+    reference_node = generator.loc[generator['Slack bus']== True, 'Location'].unique().tolist()
     model.theta[reference_node].fix(0)
 
     # Power balance at each node
