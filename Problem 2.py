@@ -20,6 +20,6 @@ sheet_4 = 'Problem 2.5 - Environmental'
 generator, load, transmission = read_excel_file(filename, sheet_2)
 
 # OPF_DC(generator, load, transmission, sheetname, WTP = 0, CO2_reduction)
-OPF_DC(generator, load, transmission,)
+OPF_DC(generator, load, transmission)
 
 
