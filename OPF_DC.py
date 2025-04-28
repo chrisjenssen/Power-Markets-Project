@@ -171,6 +171,22 @@ def OPF_DC(generator, load, transmission):
     # usage
     dump_all_vars(model)
 
+    # Extract and print shadow prices (dual variables)
+    print("\nShadow Prices (Dual Variables):")
+    model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+
+    for const in model.component_objects(pyo.Constraint, active=True):
+        print(f"\nConstraint: {const.name}")
+        for idx in const:
+            try:
+                dual_value = model.dual[const[idx]]
+                if dual_value is not None:
+                    print(f"  {idx} : {dual_value:.3f}")
+                else:
+                    print(f"  {idx} : n/a")
+            except KeyError:
+                print(f"  {idx} : Dual value not available")
+
 
 """
 # --- Generator results ---
