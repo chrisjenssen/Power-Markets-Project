@@ -235,7 +235,7 @@ def OPF_DC_2_4(generator, load, transmission):
     print("\n=== Generator‐limit Shadow Prices ===")
     print(df_gen_shadow.to_string(index=False))
 
-    print("\n=== Nodal Prices (LMPs) ===")
+    print("\n=== Nodal Prices, Locational Marginal Price (LMPs) ===")
     print(df_node_shadow.to_string(index=False))
 
     print("\n=== Line‐flow Shadow Prices ===")
@@ -252,24 +252,3 @@ def OPF_DC_2_4(generator, load, transmission):
                     print(f"  {idx} : {val:.3f}" if isinstance(val, (int, float)) else f"  {idx} : {val}")
 
     dump_all_vars(model)
-
-
-filename = 'Problem_2_data.xlsx'
-
-sheet_1 = 'Problem 2.2 - Base case'
-sheet_2 = 'Problem 2.3 - Generators'
-sheet_3 = 'Problem 2.4 - Loads'
-sheet_4 = 'Problem 2.5 - Environmental'
-
-generator, load, transmission = read_excel_file(filename, sheet_3)
-print(generator)
-print(load)
-print(transmission)
-
-
-#num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
-#Y_bus = create_y_matrix(num_buses, transmission)
-#Y_DC = generate_Y_DC(generator, Y_bus)
-
-OPF_DC(generator, load, transmission)
-

@@ -27,7 +27,7 @@ def read_excel_file_2_5(fileName, sheetName):
 
     return gen, ld, tr
 
-def OPF_DC_2_5(generator, load, transmission):
+def OPF_DC_2_5(generator, load, transmission, CES = 0):
     """
     This function sets up and solves a DC Optimal Power Flow (OPF) problem using Pyomo.
     It takes in generator, load, and transmission data as input.
@@ -207,18 +207,19 @@ def OPF_DC_2_5(generator, load, transmission):
         return model.flow_trans[t] == model.Susceptance[t] * (model.theta[from_n] - model.theta[to_n])
 
     model.flow_balance_const = pyo.Constraint(model.T, rule=flow_balance_rule)
-    """
-    # Enforce Gen 2 ≥ 20% of total generation
-    def emission_rule(model):
-        return model.gen['Gen 2'] >= 0.2 * sum(model.gen[g] for g in model.G)
 
-    #model.emission_const = pyo.Constraint(rule=emission_rule)
-    """
-    # Cap and trade rule
-    def cap_and_trade_rule(model):
-        return sum(model.em[g] * model.gen[g] for g in model.G) <= 950000
+    if CES == 1:
+        # Enforce Gen 2 ≥ 20% of total generation
+        def emission_rule(model):
+            return model.gen['Gen 2'] >= 0.2 * sum(model.gen[g] for g in model.G)
 
-    model.cap_and_trade_const = pyo.Constraint(rule=cap_and_trade_rule)
+        model.emission_const = pyo.Constraint(rule=emission_rule)
+    else:
+        # Cap and trade rule
+        def cap_and_trade_rule(model):
+            return sum(model.em[g] * model.gen[g] for g in model.G) <= 950000
+
+        model.cap_and_trade_const = pyo.Constraint(rule=cap_and_trade_rule)
 
     # model.pprint()
 
@@ -322,23 +323,3 @@ def OPF_DC_2_5(generator, load, transmission):
                     print(f"  {idx} : {val:.3f}" if isinstance(val, (int, float)) else f"  {idx} : {val}")
 
     dump_all_vars(model)
-
-
-filename = 'Problem_2_data.xlsx'
-
-sheet_1 = 'Problem 2.2 - Base case'
-sheet_2 = 'Problem 2.3 - Generators'
-sheet_3 = 'Problem 2.4 - Loads'
-sheet_4 = 'Problem 2.5 - Environmental'
-
-generator, load, transmission = read_excel_file(filename, sheet_4)
-print(generator)
-print(load)
-print(transmission)
-
-
-#num_buses = 3  # Set the number of buses in your system, have to do this manually due to the set up in excel file
-#Y_bus = create_y_matrix(num_buses, transmission)
-#Y_DC = generate_Y_DC(generator, Y_bus)
-
-OPF_DC(generator, load, transmission)
