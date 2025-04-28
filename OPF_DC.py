@@ -59,13 +59,15 @@ def OPF_DC(generator, load, transmission):
     """ ---- Variables ---- """
 
     # Generation levels for each generator
-    model.gen = pyo.Var(model.G, bounds=lambda m,g: (0, m.Capacity_gen[g]), initialize=0.0)
+    model.gen = pyo.Var(model.G, initialize=0.0)
     
     # Power flow through each transmission line
-    model.flow_trans = pyo.Var(model.T, bounds=lambda m,t: (-m.Capacity_trans[t], m.Capacity_trans[t]), initialize=0.0)
+    model.flow_trans = pyo.Var(model.T, initialize=0.0)
 
     # Voltage angle at each node
     model.theta = pyo.Var(model.N,initialize=0.0)
+
+    model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
     #----> Optional variables <----#
     #Binary Variables, to model on/off decisions (e.g., whether a generator is running)
@@ -173,7 +175,6 @@ def OPF_DC(generator, load, transmission):
 
     # Extract and print shadow prices (dual variables)
     print("\nShadow Prices (Dual Variables):")
-    model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
     for const in model.component_objects(pyo.Constraint, active=True):
         print(f"\nConstraint: {const.name}")
