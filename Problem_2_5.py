@@ -237,65 +237,13 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
     results = opt.solve(model, tee=True)
     model.solutions.load_from(results)
 
-
-    # 1) PRODUCTION COST per generator
-    prod_data = []
+    print("\n=== Binding constraints ===")
     for g in model.G:
-        q = model.gen[g].value
-        c = model.MarginalCost[g]
-        prod_data.append({
-            'Generator': g,
-            'Quantity [MW]': q,
-            'Marginal Cost [NOK/MWh]': c,
-            'Total Cost [NOK/h]': q * c
-        })
-    df_prod = pd.DataFrame(prod_data)
-    """
-    # 2) SHADOW PRICES
-    #  2a) generator limits
-    gen_shadow = []
-    for g in model.G:
-        π_min = model.dual[model.min_gen_const[g]]  # should almost always be zero
-        π_max = model.dual[model.max_gen_const[g]]
-        gen_shadow.append({
-            'Generator': g,
-            'Dual min-gen (lower bound)': π_min,
-            'Dual max-gen (upper bound)': π_max
-        })
-    df_gen_shadow = pd.DataFrame(gen_shadow)
-
-    #  2b) nodal prices = dual of power balance
-    node_shadow = []
-    for n in model.N:
-        λ = model.dual[model.power_balance_const[n]]
-        node_shadow.append({'Node': n, 'LMP [NOK/MWh]': λ})
-    df_node_shadow = pd.DataFrame(node_shadow)
-
-    #  2c) line‐flow shadows
-    line_shadow = []
+        if abs(model.gen[g].value - model.Capacity_gen[g]) < 1e-6:
+            print(f" Generator {g} at upper limit")
     for t in model.T:
-        μ_up = model.dual[model.max_flow_trans_const[t]]
-        μ_down = model.dual[model.min_flow_trans_const[t]]
-        line_shadow.append({
-            'Line': t,
-            'Dual max-flow (upper)': μ_up,
-            'Dual min-flow (lower)': μ_down
-        })
-    df_line_shadow = pd.DataFrame(line_shadow)
-
-    # Print or return them
-    print("\n=== Production Costs ===")
-    print(df_prod.to_string(index=False))
-
-    print("\n=== Generator‐limit Shadow Prices ===")
-    print(df_gen_shadow.to_string(index=False))
-
-    print("\n=== Nodal Prices (LMPs) ===")
-    print(df_node_shadow.to_string(index=False))
-
-    print("\n=== Line‐flow Shadow Prices ===")
-    print(df_line_shadow.to_string(index=False))
-    """
+        if abs(abs(model.flow_trans[t].value) - model.Capacity_trans[t]) < 1e-6:
+            print(f" Line {t} congested")
 
     # Extract and print shadow prices (dual variables)
     print("\nShadow Prices (Dual Variables):")

@@ -51,7 +51,7 @@ To run the tasks uncomment the task you want to test bellow
 ===========================================================
 """
 
-#Task_2_2()
+Task_2_2()
 #Task_2_3()
 #Task_2_4_without_WTP()
 #Task_2_4_with_WTP()

@@ -230,63 +230,20 @@ def OPF_DC_2_4_WTP(generator, load, transmission):
         if abs(abs(model.flow_trans[t].value) - model.Capacity_trans[t]) < 1e-6:
             print(f" Line {t} congested")
 
-    # 1) PRODUCTION COST per generator
-    prod_data = []
-    for g in model.G:
-        q = model.gen[g].value
-        c = model.MarginalCost[g]
-        prod_data.append({
-            'Generator': g,
-            'Quantity [MW]': q,
-            'Marginal Cost [NOK/MWh]': c,
-            'Total Cost [NOK/h]': q * c
-        })
-    df_prod = pd.DataFrame(prod_data)
+    # Extract and print shadow prices (dual variables)
+    print("\nShadow Prices (Dual Variables):")
 
-    # 2) SHADOW PRICES
-    #  2a) generator limits
-    gen_shadow = []
-    for g in model.G:
-        π_min = model.dual[model.min_gen_const[g]]  # should almost always be zero
-        π_max = model.dual[model.max_gen_const[g]]
-        gen_shadow.append({
-            'Generator': g,
-            'Dual min-gen (lower bound)': π_min,
-            'Dual max-gen (upper bound)': π_max
-        })
-    df_gen_shadow = pd.DataFrame(gen_shadow)
-
-    #  2b) nodal prices = dual of power balance
-    node_shadow = []
-    for n in model.N:
-        λ = model.dual[model.power_balance_const[n]]
-        node_shadow.append({'Node': n, 'LMP [NOK/MWh]': λ})
-    df_node_shadow = pd.DataFrame(node_shadow)
-
-    #  2c) line‐flow shadows
-    line_shadow = []
-    for t in model.T:
-        μ_up = model.dual[model.max_flow_trans_const[t]]
-        μ_down = model.dual[model.min_flow_trans_const[t]]
-        line_shadow.append({
-            'Line': t,
-            'Dual max-flow (upper)': μ_up,
-            'Dual min-flow (lower)': μ_down
-        })
-    df_line_shadow = pd.DataFrame(line_shadow)
-
-    # Print or return them
-    print("\n=== Production Costs ===")
-    print(df_prod.to_string(index=False))
-
-    print("\n=== Generator‐limit Shadow Prices ===")
-    print(df_gen_shadow.to_string(index=False))
-
-    print("\n=== Nodal Prices (LMPs) ===")
-    print(df_node_shadow.to_string(index=False))
-
-    print("\n=== Line‐flow Shadow Prices ===")
-    print(df_line_shadow.to_string(index=False))
+    for const in model.component_objects(pyo.Constraint, active=True):
+        print(f"\nConstraint: {const.name}")
+        for idx in const:
+            try:
+                dual_value = model.dual[const[idx]]
+                if dual_value is not None:
+                    print(f"  {idx} : {dual_value:.3f}")
+                else:
+                    print(f"  {idx} : n/a")
+            except KeyError:
+                print(f"  {idx} : Dual value not available")
 
     def dump_all_vars(m):
         for varobj in m.component_objects(pyo.Var, active=True):
