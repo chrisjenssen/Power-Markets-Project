@@ -40,9 +40,9 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
 
     model.N = pyo.Set(ordered=True, initialize=load['Location.1'].unique().tolist())  # Set for nodes
 
-    model.G = pyo.Set(ordered=True, initialize=generator['Generator'].tolist())
+    model.G = pyo.Set(ordered=True, initialize=generator['Generator'].tolist()) # Set for generators
 
-    # map each generator → its node
+    # map each generator to its node
     model.GenLocation = pyo.Param(
         model.G,
         initialize=generator.set_index('Generator')['Location'].to_dict()
@@ -50,10 +50,10 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
 
     model.T = pyo.Set(ordered=True, initialize=transmission['Line'].tolist())  # Set for transmission lines
 
-    # ---- NEW: define a load‐unit set L ----
+    # Define a load‐unit set L
     model.L = pyo.Set(initialize=load['Load unit'].tolist())
 
-    # map each load → its node
+    # map each load to its node
     model.LoadLocation = pyo.Param(
         model.L,
         initialize=load.set_index('Load unit')['Location.1'].to_dict()
@@ -72,7 +72,7 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
 
     # Nodes
 
-    # build a dict: node → total demand (sum over all load units at that node)
+    # Total demand by node (sum over all load units at that node)
     demand_by_node = (
         load
         .groupby('Location.1')['Demand [MW]']
@@ -81,17 +81,9 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
     )
     model.Demand = pyo.Param(model.N, initialize=demand_by_node)  # Parameter for demand for every node
 
-    # ---- replace fixed-demands by served‐load vars ----
+    # replace fixed-demands by served‐load vars
     # how much of each load‐unit we actually serve (0 ≤ serve ≤ D_L)
     model.serve = pyo.Var(model.L, bounds=lambda M, ℓ: (0, M.D_L[ℓ]), initialize=lambda M, ℓ: M.D_L[ℓ])
-
-    # force inelastic loads (WTP=0) to be fully served
-    def inelastic_rule(M, ℓ):
-        if M.WTP[ℓ] == 0.0:
-            return M.serve[ℓ] == M.D_L[ℓ]
-        return pyo.Constraint.Skip
-
-    model.inelastic_const = pyo.Constraint(model.L, rule=inelastic_rule)
 
     # Generators
 
@@ -136,13 +128,6 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
     # Voltage angle at each node
     model.theta = pyo.Var(model.N, initialize=0.0)
 
-    # ----> Optional variables <----#
-    # Binary Variables, to model on/off decisions (e.g., whether a generator is running)
-    # model.gen_status = pyo.Var(model.G, within=pyo.Binary)
-
-    # Load shedding at each node (if applicable, dont know if it is)
-    # model.shed = pyo.Var(model.N, within=pyo.NonNegativeReals)
-
     """
     Objective function:
     Maximize social welfare
@@ -157,6 +142,14 @@ def OPF_DC_2_5(generator, load, transmission, CES = 0):
     """
     Constraints
     """
+
+    # force inelastic loads (WTP=0) to be fully served
+    def inelastic_rule(M, ℓ):
+        if M.WTP[ℓ] == 0.0:
+            return M.serve[ℓ] == M.D_L[ℓ]
+        return pyo.Constraint.Skip
+
+    model.inelastic_const = pyo.Constraint(model.L, rule=inelastic_rule)
 
     # Minimum generation constraint
     def min_gen_rule(model, g):

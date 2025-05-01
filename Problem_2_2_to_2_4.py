@@ -4,7 +4,7 @@ from pyomo.opt import SolverFactory
 import pandas as pd
 
 
-def OPF_DC_2_4(generator, load, transmission):
+def OPF_DC_2_2_to_2_4(generator, load, transmission):
     """
     This function sets up and solves a DC Optimal Power Flow (OPF) problem using Pyomo.
     It takes in generator, load, and transmission data as input.
@@ -17,9 +17,9 @@ def OPF_DC_2_4(generator, load, transmission):
 
     model.N = pyo.Set(ordered=True, initialize=load['Location.1'].unique().tolist())  # Set for nodes
 
-    model.G = pyo.Set(ordered=True, initialize=generator['Generator'].tolist())
+    model.G = pyo.Set(ordered=True, initialize=generator['Generator'].tolist()) # Set for generators
 
-    # map each generator → its node
+    # map each generator to its node
     model.GenLocation = pyo.Param(
         model.G,
         initialize=generator.set_index('Generator')['Location'].to_dict()
@@ -31,7 +31,7 @@ def OPF_DC_2_4(generator, load, transmission):
 
     # Nodes
 
-    # build a dict: node → total demand (sum over all load units at that node)
+    # build a dict: node -> total demand (sum over all load units at that node)
     demand_by_node = (
         load
         .groupby('Location.1')['Demand [MW]']
@@ -42,8 +42,10 @@ def OPF_DC_2_4(generator, load, transmission):
 
     # Generators
 
+    # Parameter for capacity for generators
     model.Capacity_gen = pyo.Param(model.G, initialize=generator.set_index('Generator')['Capacity [MW]'].to_dict())
 
+    #Parameter for MC for generatos
     model.MarginalCost = pyo.Param(model.G,
                                    initialize=generator.set_index('Generator')['Marginal cost NOK/MWh]'].to_dict())
 
@@ -51,6 +53,7 @@ def OPF_DC_2_4(generator, load, transmission):
 
     # Transmission lines
 
+    # Parameter for capacity of lines
     model.Capacity_trans = pyo.Param(model.T, initialize=transmission.set_index('Line')["Capacity [MW].1"].to_dict())
 
     model.Susceptance = pyo.Param(model.T, initialize=transmission.set_index('Line')[
@@ -80,13 +83,6 @@ def OPF_DC_2_4(generator, load, transmission):
 
     # Voltage angle at each node
     model.theta = pyo.Var(model.N, initialize=0.0)
-
-    # ----> Optional variables <----#
-    # Binary Variables, to model on/off decisions (e.g., whether a generator is running)
-    # model.gen_status = pyo.Var(model.G, within=pyo.Binary)
-
-    # Load shedding at each node (if applicable, dont know if it is)
-    # model.shed = pyo.Var(model.N, within=pyo.NonNegativeReals)
 
     """
     Objective function:
@@ -126,8 +122,6 @@ def OPF_DC_2_4(generator, load, transmission):
     model.min_flow_trans_const = pyo.Constraint(model.T, rule=min_flow_trans_rule)
 
     # Set the reference node to have a theta == 0
-    #reference_node = generator.loc[generator['Slack bus'], 'Location'].item()
-
     reference_node = generator.loc[generator['Slack bus'] == True, 'Location'].unique().tolist()
 
     model.theta[reference_node].fix(0)
@@ -164,8 +158,6 @@ def OPF_DC_2_4(generator, load, transmission):
     """
     Compute the optimization problem
     """
-
-    #model = pyo.ConcreteModel()
 
     # register dual suffix so we can pull shadow prices back in
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
